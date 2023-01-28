@@ -1,10 +1,7 @@
-import json
-import os
 from typing import Literal, Optional
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-from fastapi.encoders import jsonable_encoder
 import models
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
@@ -21,7 +18,7 @@ def get_db():
     finally:
         db.close()
 
-class user (BaseModel):
+class User(BaseModel):
     name: str
     lastname: str
     user_id: Optional[str] = uuid4().hex
@@ -30,12 +27,9 @@ class user (BaseModel):
 USER_DATABASE = []
 
 
-USERS_FILE = "users.json"
 
 
-if os.path.exists(USERS_FILE):
-    with open (USERS_FILE, "r") as file:
-        USER_DATABASE = json.load(file)
+
 
 
 ##/ -> Root to apresentation 
@@ -46,40 +40,60 @@ async def home():
 
 # /list-users -> List all users
 @app.get("/list-users")
-async def list_users():
-    return { "users": USER_DATABASE }
+async def list_users(db: Session = Depends(get_db)):
+    return db.query(models.Users).all()
 
 
 # /list-user-by-index/{index} -> List User by Index
 @app.get("/list-user-by-index/{index}")
-async def list_user_by_index(index: int):
+async def list_user_by_index(index: int, db: Session = Depends(get_db)):
     if index < 0 or index >= len(USER_DATABASE):
         raise HTTPException(404, "Index out of range")
     else:
-        return { "users": USER_DATABASE[index] }
+        return db.query(models.Users).filter(models.Users.user_id == index).first()
 
 
 
 # /add-user -> Add New User
 @app.post("/add-user")
-async def add_user(user: user):
-    user.user_id = uuid4().hex
-    json_user = jsonable_encoder(user)
-    USER_DATABASE.append(json_user)
+async def add_user(user: User, db: Session = Depends(get_db)):
+
+    user_model = models.Users()
+    user_model.name = user.name
+    user_model.lastname = user.lastname
+    user_model.genre = user.genre
+
+    db.add(user_model)
+    db.commit()
+
+    return user
     
-    with open (USERS_FILE, "w") as file:
-        json.dump(USER_DATABASE, file)
-    return { "message": f'The user {user} has been added' }
+    
+
 
 
 
 # /delete-user-by-index/{index} -> Delete User by Index
 @app.delete("/delete-user-by-index/{index}")
-async def delete_user_by_index(index: int):
-    user.user_id = uuid4().hex
-    json_user = jsonable_encoder(user)
-    USER_DATABASE.pop(json_user)
+async def delete_user_by_index(index: int,  db: Session = Depends(get_db)):
+    user_model = db.query(models.Users).filter(models.Users.user_id == index).first()
+
+
+    if user_model is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"ID {index} : Does not exist"
+        )
+    db.query(models.Users).filter(models.Users.user_id == index).delete()
+    db.commit()
+
+
+
+#/delete-all-users -> Delete all users from database
+
+@app.delete("/delete-all-users")
+async def delete_all_users(db: Session = Depends(get_db)):
     
-    with open (USERS_FILE, "w") as file:
-        json.dump(USER_DATABASE, file)
-    return { "message": f'The user {user} has been deleted' }
+
+    db.query(models.Users).delete()
+    db.commit()
